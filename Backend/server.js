@@ -40,7 +40,6 @@ const Employee = mongoose.model("Employee", EmployeeSchema);
 
 const attendanceSchema = new mongoose.Schema({
     emid: { type: String, required: true }, // Unique Employee ID
-    name: { type: String, required: true }, // Employee Name
     checkInTime: { type: Date, required: true }, // Timestamp of check-in
     checkOutTime: { type: Date }, // Timestamp of check-out (nullable until checkout)
     duration: { type: Number, default: 0 } // Duration in minutes (calculated at checkout)
@@ -103,7 +102,7 @@ app.post("/employee-login", async (req, res) => {
         }
 
         // Generate JWT Token
-        const token = jwt.sign({ id: employee._id, emid: employee.emid }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        const token = jwt.sign({ id: employee._id, emid: employee.emid }, process.env.JWT_SECRET, { expiresIn: "24h" });
 
         res.status(200).json({ success: true, message: "Login successful!", token });
     } catch (error) {
@@ -126,9 +125,8 @@ app.post("/register", async (req, res) => {
     }
 
     // Hash the password before saving
-    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newAdmin = new Admin({ email, name, password: hashedPassword, officeId });
+    const newAdmin = new Admin({ email, name, password, officeId });
     await newAdmin.save();
     console.log("New admin added:", newAdmin);
 
@@ -142,6 +140,7 @@ app.post("/register", async (req, res) => {
 // 🔹 API Route to Admin Login
 app.post("/login", async (req, res) => {
     try {
+      
         const { email, password } = req.body;
 
         if (!email || !password) {
@@ -154,7 +153,8 @@ app.post("/login", async (req, res) => {
             return res.status(401).json({ message: "Invalid email or password!" });
         }
 
-        res.status(200).json({ success: true, message: "Login successful!" });
+        const token = jwt.sign({ id: admin._id, emid: admin.emid }, process.env.JWT_SECRET, { expiresIn: "24h" });
+        res.status(200).json({ success: true, message: "Login successful!", token });
 
     } catch (error) {
         console.error("Login error:", error);
@@ -163,24 +163,46 @@ app.post("/login", async (req, res) => {
 });
 
 // 🔹 Middleware to Verify Token
-const verifyToken = (req, res, next) => {
-  const token = req.headers["authorization"];
-  if (!token) {
-    return res.status(403).json({ message: "Access Denied: No Token Provided!" });
-  }
 
+const verifyToken = (req, res, next) => {
   try {
-    const decoded = jwt.verify(token.split(" ")[1], process.env.JWT_SECRET);
-    req.admin = decoded;
-    next();
+    // Extract token from the "Authorization" header
+    const authHeader = req.headers["authorization"];
+    
+    if (!authHeader) {
+      return res.status(403).json({ message: "Access Denied: No Token Provided!" });
+    }
+
+    // Ensure token is in "Bearer <token>" format
+    const tokenParts = authHeader.split(" ");
+    if (tokenParts.length !== 2 || tokenParts[0] !== "Bearer") {
+      return res.status(400).json({ message: "Malformed Token!" });
+    }
+
+    const token = tokenParts[1];
+    console.log("Received Token:", token);
+
+
+    // Verify the token
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      if (err) {
+        console.error("JWT Verification Error:", err.message);
+        return res.status(401).json({ message: "Invalid or Expired Token" });
+      }
+
+      req.user = decoded; // Attach decoded payload to request
+      next();
+    });
+
   } catch (error) {
-    return res.status(401).json({ message: "Invalid Token" });
+    console.error("Token Verification Failed:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+module.exports = verifyToken;
 
 app.post("/attendance/checkin", verifyToken, async (req, res) => {
     try {
-        const { officeId } = req.body;
         const employeeId = req.user.id;
 
         // Check if already checked in
@@ -192,7 +214,7 @@ app.post("/attendance/checkin", verifyToken, async (req, res) => {
         // Create new check-in record
         const attendance = new Attendance({
             employeeId,
-            officeId,
+            
             checkInTime: new Date()
         });
 
@@ -236,33 +258,54 @@ app.get("/attendance/history", verifyToken, async (req, res) => {
 });
 
 
-app.get("/admin/office", async (req, res) => {
-    try {
-        // Assuming you are using JWT and have middleware to get user info
-        const adminId = req.user.id; // Get the logged-in admin's ID from JWT
-        const admin = await Admin.findById(adminId); // Fetch admin from DB
+// app.get("/admin/office", async (req, res) => {
+//     try {
+//         // Assuming you are using JWT and have middleware to get user info
+//         const adminId = req.user.id; // Get the logged-in admin's ID from JWT
+//         const admin = await Admin.findById(adminId); // Fetch admin from DB
 
-        if (!admin) {
-            return res.status(404).json({ error: "Admin not found" });
-        }
+//         if (!admin) {
+//             return res.status(404).json({ error: "Admin not found" });
+//         }
 
-        res.json({ officeId: admin.officeId });
-    } catch (error) {
-        res.status(500).json({ error: "Failed to fetch officeId" });
-    }
+//         res.json({ officeId: admin.officeId });
+//     } catch (error) {
+//         res.status(500).json({ error: "Failed to fetch officeId" });
+//     }
+// });
+
+
+// // ✅ Get employees by officeId
+// app.get("/employees/:officeId", async (req, res) => {
+//     const { officeId } = req.params;
+//     try {
+//       const employees = await Employee.find({ officeId });
+//       res.json(employees);
+//     } catch (error) {
+//       res.status(500).json({ error: "Failed to fetch employees" });
+//     }
+//   });
+app.get("/admin/employees", verifyToken, async (req, res) => {
+  try {
+      const adminId = req.user.id; // Get logged-in admin's ID from JWT
+      const admin = await Admin.findById(adminId);
+
+      if (!admin) {
+          return res.status(404).json({ error: "Admin not found" });
+      }
+
+      console.log("Fetching employees for officeId:", admin.officeId); // Debugging Log
+
+      // Find employees with the same officeId as the admin
+      const employees = await Employee.find({ officeId: admin.officeId });
+
+      res.json(employees);
+  } catch (error) {
+      console.error("Error fetching employees:", error); // Log the error
+      res.status(500).json({ error: "Failed to fetch employees" });
+  }
 });
 
-
-// ✅ Get employees by officeId
-app.get("/employees/:officeId", async (req, res) => {
-    const { officeId } = req.params;
-    try {
-      const employees = await Employee.find({ officeId });
-      res.json(employees);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch employees" });
-    }
-  });
   
   app.post("/employees", async (req, res) => {
     const { empId, name, password, officeId } = req.body;

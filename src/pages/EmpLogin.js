@@ -14,16 +14,29 @@ const EmployeeLogin = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError("");
-
+    
         try {
             const response = await axios.post("http://localhost:5000/employee-login", formData);
-            alert(response.data.message);
-            localStorage.setItem("employeeToken", response.data.token); // Store JWT token
-            navigate("/employee-dash"); // Redirect to dashboard
+            
+            if (response.data.token) {
+                console.log("Received Token:", response.data.token); // Debugging: Log the received token
+                localStorage.setItem("employeeToken", response.data.token); // Store JWT token
+    
+                // Verify token storage
+                const storedToken = localStorage.getItem("employeeToken");
+                console.log("Stored Token:", storedToken); // Debugging: Check if token is saved
+                
+                alert(response.data.message);
+                navigate("/employee-dash"); // Redirect to dashboard
+            } else {
+                throw new Error("Token not received from server.");
+            }
         } catch (err) {
+            console.error("Login Error:", err.response?.data || err);
             setError(err.response?.data?.message || "Login failed! Invalid credentials.");
         }
     };
+    
 
     return (
         <div style={{

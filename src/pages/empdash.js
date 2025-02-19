@@ -29,16 +29,27 @@ const EmployeeDashboard = () => {
     // Handle Check-In
     const handleCheckIn = async () => {
         try {
+            const token = localStorage.getItem("token");
+            console.log("Token being sent:", token); // Debugging step
+    
+            if (!token) {
+                alert("You are not authenticated! Please log in again.");
+                return;
+            }
+    
             await axios.post("http://localhost:5000/attendance/checkin", {}, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+                headers: { Authorization: `Bearer ${token}` }
             });
+    
             alert("Check-in successful!");
             setIsCheckedIn(true);
             fetchAttendance(); // Refresh records
         } catch (error) {
+            console.error("Check-in error:", error.response?.data || error);
             alert(error.response?.data?.error || "Check-in failed");
         }
     };
+    
 
     // Handle Check-Out
     const handleCheckOut = async () => {
